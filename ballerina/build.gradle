@@ -1,0 +1,82 @@
+import groovy.json.JsonSlurper
+import org.apache.tools.ant.taskdefs.condition.Os
+
+/*
+ * Copyright (c) 2026, WSO2 LLC. (http://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+description = 'Ballerina - SAP SuccessFactors Recruiting API'
+
+subprojects {
+    ext {
+        packageOrg = "ballerinax"
+        ballerinaTomlFilePlaceHolder = new File("${project.rootDir}/build-config/resources/Ballerina.toml")
+    }
+
+    task updateDocumentationFiles
+}
+
+def readmeMdPlaceholder = new File("${project.rootDir}/build-config/resources/README.md")
+
+task updateDocumentationFiles {
+    doLast {
+        def files = []
+        new File("${project.rootDir}/ballerina").eachDir { files << it.name }
+
+        for (String dir in files) {
+
+            if (dir == "resources") {
+                continue
+            }
+
+            def packageProperties = new File("${project.rootDir}/ballerina/${dir}/docs.json")
+            def parsedJson = new JsonSlurper().parseText(packageProperties.text)
+
+            def readmeMdFile = new File("${project.rootDir}/ballerina/${dir}/README.md")
+
+            def newReadmeMdFile = readmeMdPlaceholder.text
+            newReadmeMdFile = newReadmeMdFile.replace("@package-name@", "sap.successfactors.${dir}")
+            newReadmeMdFile = newReadmeMdFile.replace("@description@", parsedJson.description)
+            newReadmeMdFile = newReadmeMdFile.replace("@key-features@", parsedJson."key-features".collect { "- ${it}" }.join("\n"))
+            newReadmeMdFile = newReadmeMdFile.replace("@communication-scenario@", parsedJson."communication-scenario")
+            newReadmeMdFile = newReadmeMdFile.replace("@import-statement@", parsedJson."import-statement")
+            newReadmeMdFile = newReadmeMdFile.replace("@client-init@", parsedJson."client-init")
+            newReadmeMdFile = newReadmeMdFile.replace("@api-invocation@", parsedJson."api-invocation")
+            readmeMdFile.text = newReadmeMdFile
+        }
+
+        project.exec {
+            ignoreExitValue true
+            if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+                commandLine 'cmd', '/c', "git commit -m \"[Automated] Update the documentation file\" */README.md"
+            } else {
+                commandLine 'sh', '-c', "git commit -m '[Automated] Update the documentation file' */README.md"
+            }
+        }
+    }
+}
+
+task build {
+    dependsOn(updateDocumentationFiles)
+    dependsOn(':recruiting-ballerina:rcmjobrequisition:build')
+    dependsOn(':recruiting-ballerina:rcmjobapplication:build')
+    dependsOn(':recruiting-ballerina:rcmcandidate:build')
+    dependsOn(':recruiting-ballerina:rcmoffer:build')
+    dependsOn(':recruiting-ballerina:recruitingrcm:build')
+}
+
+publishToMavenLocal.dependsOn build
+publish.dependsOn build

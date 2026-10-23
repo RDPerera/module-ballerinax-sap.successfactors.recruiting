@@ -1,0 +1,30 @@
+name: Publish Release (All Packages)
+
+# Releases every connector package sequentially using the standard
+# ballerina-library release template (max-parallel: 1, because every release
+# pushes a version-bump commit and a release branch).
+#
+# fail-fast is disabled so one failing connector does not block the rest;
+# re-run the single-package "Publish Release" workflow for any that failed.
+on:
+  workflow_dispatch:
+
+jobs:
+  release-connectors:
+    name: Release Connectors
+    if: ${{ github.repository_owner == 'ballerina-platform' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        connector:
+          - rcmjobrequisition
+          - rcmjobapplication
+          - rcmcandidate
+          - rcmoffer
+          - recruitingrcm
+    uses: ballerina-platform/ballerina-library/.github/workflows/s4hana-release-template.yml@main
+    secrets: inherit
+    with:
+      hana-connector-group: recruiting
+      hana-connector-name: ${{ matrix.connector }}

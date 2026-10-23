@@ -1,0 +1,13 @@
+[package]
+org = "ballerinax"
+name = "@package.name@"
+version = "@toml.version@"
+distribution = "2201.13.0"
+authors = ["Ballerina"]
+keywords = ["Area/ERP & Business Operations", "Business Management/HCM", "Cost/Paid", "Vendor/SAP", "SuccessFactors", "Recruiting"]
+repository = "https://github.com/ballerina-platform/module-ballerinax-sap.successfactors.recruiting"
+icon = "../icon.png"
+license = ["Apache-2.0"]
+
+[build-options]
+observabilityIncluded = true

@@ -18,6 +18,7 @@
 // under the License.
 
 import ballerina/http;
+import ballerinax/sap;
 
 public type GetJobOfferResponse record {
     JobOffer d?;
@@ -192,7 +193,7 @@ public type ApproveOfferQueries record {
 @display {label: "Connection Config"}
 public type ConnectionConfig record {|
     # Configurations related to client authentication
-    http:CredentialsConfig auth;
+    http:CredentialsConfig|sap:SamlBearerAuthConfig auth;
     # The HTTP version understood by the client
     http:HttpVersion httpVersion = http:HTTP_2_0;
     # Configurations related to HTTP/1.x protocol

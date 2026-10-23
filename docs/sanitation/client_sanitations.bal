@@ -16,65 +16,48 @@
 import ballerina/io;
 import ballerina/os;
 
+// Turns a generated SuccessFactors OData client into an `ballerinax/sap` client:
+// - `http:Client` becomes `sap:Client`, which adds the CSRF and SAML bearer handling SAP needs.
+// - `serviceUrl` (with or without a generated default) becomes `hostname` and `port`, and the
+//   service URL is built as `https://<hostname>:<port>/<apiPostfix>`.
+// - The client configuration is mapped onto `sap:ConnectionConfig`, and `auth` in `types.bal` accepts
+//   Basic Auth or OAuth 2.0 SAML bearer (`http:CredentialsConfig|sap:SamlBearerAuthConfig`).
 public function main(string moduleName, string apiPostfix) returns error? {
-    string[] clientFileLines = check io:fileReadLines(string `../ballerina/${moduleName}/client.bal`);
-    string[] updatedClientFileLines = [];
-    int j = 0;
+    string modulePath = string `../ballerina/${moduleName}`;
+    string clientPath = modulePath + "/client.bal";
+    string typesPath = modulePath + "/types.bal";
 
-    int importFileLine = 0;
-    int serviceUrlLine = 0;
+    string clientText = check io:fileReadString(clientPath);
+    clientText = re `http:Client clientEp`.replaceAll(clientText, "sap:Client clientEp");
+    clientText = re `http:Client httpEp`.replaceAll(clientText, "sap:Client httpEp");
+    clientText = re `http:ClientConfiguration httpClientConfig`.replaceAll(clientText, "sap:ConnectionConfig httpClientConfig");
+    clientText = re `string serviceUrl = "[^"]*"\) returns error\? \{`.replace(clientText,
+            "string hostname, int port = 443) returns error? {\n        string serviceUrl = string `https://${hostname}:${port}/" + apiPostfix + "`;");
+    clientText = re `string serviceUrl\) returns error\? \{`.replace(clientText,
+            "string hostname, int port = 443) returns error? {\n        string serviceUrl = string `https://${hostname}:${port}/" + apiPostfix + "`;");
+    clientText = addSapImport(clientText);
+    check io:fileWriteString(clientPath, clientText);
 
-    foreach int i in 0 ... clientFileLines.length() - 1 {
-        if clientFileLines[i] == "import ballerina/http;" {
-            importFileLine = i;
-        }
+    string typesText = check io:fileReadString(typesPath);
+    typesText = re `http:CredentialsConfig auth;`.replace(typesText, "http:CredentialsConfig|sap:SamlBearerAuthConfig auth;");
+    typesText = addSapImport(typesText);
+    check io:fileWriteString(typesPath, typesText);
 
-        int? firstClientOccurance = clientFileLines[i].indexOf("http:Client clientEp");
-        if firstClientOccurance is int {
-            clientFileLines[i] = clientFileLines[i].substring(0, firstClientOccurance) + "sap:Client clientEp" +
-                                clientFileLines[i].substring(firstClientOccurance + 20);
-        }
+    check run("format", modulePath);
+    check run("build", modulePath);
+}
 
-        int? serviceUrlOccurance = clientFileLines[i].indexOf("string serviceUrl");
-        if serviceUrlOccurance is int {
-            clientFileLines[i] = clientFileLines[i].substring(0, serviceUrlOccurance - 1) + "string hostname, int port = 443" +
-                                clientFileLines[i].substring(serviceUrlOccurance + 17);
-            serviceUrlLine = i;
-        }
-
-        int? secondClientOccurance = clientFileLines[i].indexOf("http:Client httpEp");
-        if secondClientOccurance is int {
-            clientFileLines[i] = clientFileLines[i].substring(0, secondClientOccurance) + "sap:Client httpEp" +
-                                clientFileLines[i].substring(secondClientOccurance + 18);
-            break;
-        }
+function addSapImport(string text) returns string {
+    if text.includes("import ballerinax/sap;") {
+        return text;
     }
+    return re `import ballerina/http;`.replace(text, "import ballerina/http;\nimport ballerinax/sap;");
+}
 
-    foreach int i in 0 ... clientFileLines.length() - 1 {
-        if i == importFileLine {
-            updatedClientFileLines[j] = clientFileLines[i];
-            updatedClientFileLines[j + 1] = "import ballerinax/sap;";
-            j = j + 2;
-        } else if i == serviceUrlLine {
-            updatedClientFileLines[j] = clientFileLines[i];
-            string replaceText = "string serviceUrl = string `https://${hostname}:${port}/" + apiPostfix + "`;";
-            updatedClientFileLines[j + 1] = replaceText;
-            j = j + 2;
-        } else {
-            updatedClientFileLines[j] = clientFileLines[i];
-            j = j + 1;
-        }
+function run(string command, string modulePath) returns error? {
+    os:Process process = check os:exec({value: "bal", arguments: [command, modulePath]});
+    int exitCode = check process.waitForExit();
+    if exitCode != 0 {
+        return error(string `bal ${command} ${modulePath} failed with exit code ${exitCode}`);
     }
-
-    check io:fileWriteLines(string `../ballerina/${moduleName}/client.bal`, updatedClientFileLines);
-
-    _ = check os:exec(command = {
-                value: "bal",
-                arguments: ["format", "../ballerina/" + moduleName]
-            });
-
-    _ = check os:exec(command = {
-                value: "bal",
-                arguments: ["build", "../ballerina/" + moduleName]
-            });
 }

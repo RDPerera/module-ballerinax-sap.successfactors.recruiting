@@ -18,6 +18,7 @@
 // under the License.
 
 import ballerina/http;
+import ballerinax/sap;
 
 # Represents the Queries record for the operation: getOfferLetterTemplate
 public type GetOfferLetterTemplateQueries record {
@@ -140,7 +141,7 @@ public type JobApplicationAudit record {
 @display {label: "Connection Config"}
 public type ConnectionConfig record {|
     # Configurations related to client authentication
-    http:CredentialsConfig auth;
+    http:CredentialsConfig|sap:SamlBearerAuthConfig auth;
     # The HTTP version understood by the client
     http:HttpVersion httpVersion = http:HTTP_2_0;
     # Configurations related to HTTP/1.x protocol

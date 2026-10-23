@@ -96,6 +96,18 @@ public function main(string apiName) returns error? {
             value.patch.operationId = check getSanitisedPathName(key, PATCH, isODATA4);
         }
     }
+    map<string> seen = {};
+    foreach var [key, value] in paths.entries() {
+        foreach Method? m in [value.get, value.post, value.put, value.delete, value.patch] {
+            string? opId = m?.operationId;
+            if opId is string {
+                if seen.hasKey(opId) {
+                    return error(string `Duplicate operationId '${opId}' for ${seen.get(opId)} and ${key}`);
+                }
+                seen[opId] = key;
+            }
+        }
+    }
     check io:fileWriteJson(specPath, spec.toJson());
 }
 
@@ -111,6 +123,18 @@ function getSanitisedPathName(string key, HttpMethod method, boolean isODATA4, j
         "/$batch" => {
             return "performBatchOperation";
         }
+        // Job Requisition has both `JobLocation` (job posting locations) and `JobLocations` (the
+        // multi-select locations of a requisition, tagged "Job Requisition Locations" by SAP). Both
+        // would pluralize to `JobLocations`, so the multi-select set is named after its SAP tag.
+        "/JobLocations" => {
+            return "listJobRequisitionLocations";
+        }
+        "/JobLocations({jobReqMultiSelectId})" => {
+            return "getJobRequisitionLocations";
+        }
+        "/JobLocations({jobReqMultiSelectId})/value" => {
+            return "getValueOfJobRequisitionLocations";
+        }
     }
 
     string parameterName = "";
@@ -121,6 +145,17 @@ function getSanitisedPathName(string key, HttpMethod method, boolean isODATA4, j
     regexp:Groups? groups = pathRegex.findGroups(key);
     if groups is () {
         return "";
+    }
+
+    // Function imports (for example `/approveOffer` or `/inviteToApply`) are already verbs in
+    // lower camel case, so their own name is the operation name. Entity sets start with an
+    // upper-case letter and get a `list`/`get`/`create`/... prefix below.
+    regexp:Span? functionImport = groups.length() == 2 ? groups[1] : ();
+    if functionImport is regexp:Span {
+        string name = functionImport.substring();
+        if name.length() > 0 && name.substring(0, 1) != name.substring(0, 1).toUpperAscii() {
+            return name;
+        }
     }
 
     boolean isCollectionReturnedResult = isCollectionReturned(method, response);
@@ -198,13 +233,28 @@ function getSanitisedPathName(string key, HttpMethod method, boolean isODATA4, j
 
 function getSanitizedName(string word, boolean isCollectionReturnedResult) returns string {
     if isCollectionReturnedResult && !word.endsWith("Details") {
-        // Simple pluralization: append 's' for most SuccessFactors entity names
-        string pluralWord = word + "s";
+        string pluralWord = pluralize(word);
         io:println(string `Plural of ${word} is ${pluralWord}`);
         return pluralWord;
     } else {
         return word;
     }
+}
+
+// Pluralizes a SuccessFactors entity name. Many entity names are already plural (for example
+// `CandidateComments` or `JobLocations`), so a trailing `s` is kept as is, except for `-us`
+// (`JobApplicationStatus` -> `JobApplicationStatuses`).
+function pluralize(string word) returns string {
+    if word.endsWith("us") || word.endsWith("ss") || word.endsWith("x") || word.endsWith("ch") || word.endsWith("sh") {
+        return word + "es";
+    }
+    if word.endsWith("s") {
+        return word;
+    }
+    if word.length() > 1 && word.endsWith("y") && !"aeiou".includes(word.substring(word.length() - 2, word.length() - 1)) {
+        return word.substring(0, word.length() - 1) + "ies";
+    }
+    return word + "s";
 }
 
 function isCollectionReturned(HttpMethod method, json? response) returns boolean {

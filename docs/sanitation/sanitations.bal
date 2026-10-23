@@ -139,8 +139,102 @@ type Specification record {
 
 public function main(string apiName) returns error? {
     string specPath = string `spec/${apiName}.json`;
+    check addMissingPathParameters(specPath);
+    check fixMultiTypeDefinitions(specPath);
     check sanitizeSchemaNames(apiName, specPath);
     check sanitizeResponseSchemaNames(specPath);
+}
+
+// Swagger 2.0 allows only a single `type`, but the SuccessFactors Recruiting specs use type lists
+// such as `["string", "null"]` (nullable), `["integer", "string"]` (Edm.Int64) or
+// `["number", "string", "null"]` (nullable Edm.Decimal), which `bal openapi` cannot resolve and
+// silently drops the operations that use them. A `null` member becomes `x-nullable: true`. When a
+// list mixes `string` with a numeric type the value is narrowed to `string`, because OData V2
+// serializes Edm.Int64 and Edm.Decimal as JSON strings. Otherwise the single remaining type is kept.
+function fixMultiTypeDefinitions(string specPath) returns error? {
+    json spec = check io:fileReadJson(specPath);
+    narrowTypeLists(spec);
+    check io:fileWriteJson(specPath, spec);
+}
+
+function narrowTypeLists(json node) {
+    if node is map<json> {
+        // Navigation collections are titled `Related Collection(SFOData.<Entity>)`. `bal openapi`
+        // cannot turn that title into a type name, and drops every operation whose payload contains
+        // one (for example `createCandidate`), so the title is rewritten to `RelatedCollectionOf<Entity>`.
+        json title = node["title"];
+        if title is string && title.startsWith("Related Collection(") && title.endsWith(")") {
+            string entity = title.substring(19, title.length() - 1);
+            if entity.startsWith("SFOData.") {
+                entity = entity.substring(8);
+            }
+            node["title"] = "RelatedCollectionOf" + entity;
+        } else if title is string && title.startsWith("Collection of ") {
+            // List responses are titled `Collection of <Entity>`, which becomes an escaped-space
+            // type name (`Collection\ of\ JobOffer`), so it is rewritten to `CollectionOf<Entity>`.
+            node["title"] = "CollectionOf" + re ` `.replaceAll(title.substring(14), "");
+        }
+        json 'type = node["type"];
+        if 'type is json[] {
+            string[] types = from json t in 'type where t is string && t != "null" select t;
+            if types.length() < 'type.length() {
+                node["x-nullable"] = true;
+            }
+            if types.length() == 1 {
+                node["type"] = types[0];
+            } else {
+                node["type"] = "string";
+                _ = node.removeIfHasKey("format");
+            }
+        }
+        foreach json child in node {
+            narrowTypeLists(child);
+        }
+    } else if node is json[] {
+        foreach json child in node {
+            narrowTypeLists(child);
+        }
+    }
+}
+
+// Some SuccessFactors operations (for example `POST /JobRequisition({jobReqId})/location_objlist`)
+// use a path key without declaring it, which `bal openapi` rejects. The other operations on the
+// same path declare it, so the missing declaration is copied from them.
+function addMissingPathParameters(string specPath) returns error? {
+    map<json> spec = check (check io:fileReadJson(specPath)).ensureType();
+    map<json> paths = check spec["paths"].ensureType();
+    foreach [string, json] [path, pathItem] in paths.entries() {
+        if pathItem !is map<json> {
+            continue;
+        }
+        map<json> declared = {};
+        foreach json operation in pathItem {
+            if operation is map<json> && operation["parameters"] is json[] {
+                foreach json param in <json[]>operation["parameters"] {
+                    if param is map<json> && param["in"] == "path" && param["name"] is string {
+                        declared[<string>param["name"]] = param;
+                    }
+                }
+            }
+        }
+        foreach json operation in pathItem {
+            if operation !is map<json> || operation["responses"] is () {
+                continue;
+            }
+            json[] parameters = operation["parameters"] is json[] ? <json[]>operation["parameters"] : [];
+            string[] present = from json p in parameters
+                where p is map<json> && p["in"] == "path" && p["name"] is string
+                select <string>p["name"];
+            foreach regexp:Groups groups in re `\{(\w+)\}`.findAllGroups(path) {
+                regexp:Span? name = groups[1];
+                if name is regexp:Span && present.indexOf(name.substring()) is () && declared.hasKey(name.substring()) {
+                    parameters.push(declared.get(name.substring()));
+                }
+            }
+            operation["parameters"] = parameters;
+        }
+    }
+    check io:fileWriteJson(specPath, spec);
 }
 
 function sanitizeSchemaNames(string apiName, string specPath) returns error? {
@@ -209,12 +303,13 @@ function sanitizeResponseSchemaNames(string specPath) returns error? {
     Specification spec = check openAPISpec.cloneWithType(Specification);
 
     map<Path> paths = spec.paths;
+    string[] definitionNames = (spec.definitions ?: {}).keys();
     foreach var [_, path] in paths.entries() {
-        check retitleOperation(path.get?.operationId, path.get?.responses, path.get?.parameters);
-        check retitleOperation(path.post?.operationId, path.post?.responses, path.post?.parameters);
-        check retitleOperation(path.put?.operationId, path.put?.responses, path.put?.parameters);
-        check retitleOperation(path.patch?.operationId, path.patch?.responses, path.patch?.parameters);
-        check retitleOperation(path.delete?.operationId, path.delete?.responses, path.delete?.parameters);
+        check retitleOperation(path.get?.operationId, path.get?.responses, path.get?.parameters, definitionNames);
+        check retitleOperation(path.post?.operationId, path.post?.responses, path.post?.parameters, definitionNames);
+        check retitleOperation(path.put?.operationId, path.put?.responses, path.put?.parameters, definitionNames);
+        check retitleOperation(path.patch?.operationId, path.patch?.responses, path.patch?.parameters, definitionNames);
+        check retitleOperation(path.delete?.operationId, path.delete?.responses, path.delete?.parameters, definitionNames);
     }
 
     check io:fileWriteJson(specPath, spec.toJson());
@@ -227,7 +322,12 @@ function sanitizeResponseSchemaNames(string specPath) returns error? {
 // generated type name and forces bal openapi to fall back to an escaped-space identifier. Giving the
 // envelope a name derived from the operationId is always meaningful and can never collide with the
 // entity type it wraps.
-function retitleOperation(string? operationId, json? responses, ParametersItem[]? parameters) returns error? {
+//
+// When an SAP definition already has the `<OperationId>Response` name (for example the
+// `InviteToApplyResponse` complex type), the envelope is named `<OperationId>Result` instead, so that
+// `bal openapi` does not fall back to a suffixed name such as `InviteToApplyResponse_`.
+function retitleOperation(string? operationId, json? responses, ParametersItem[]? parameters,
+        string[] definitionNames = []) returns error? {
     string? opId = operationId;
     if opId is () {
         return;
@@ -238,7 +338,11 @@ function retitleOperation(string? operationId, json? responses, ParametersItem[]
             if code == "default" {
                 continue;
             }
-            check retitleEnvelope(response, "schema", capitalize(opId) + "Response");
+            string responseTitle = capitalize(opId) + "Response";
+            if definitionNames.indexOf(responseTitle) !is () {
+                responseTitle = capitalize(opId) + "Result";
+            }
+            check retitleEnvelope(response, "schema", responseTitle);
         }
     }
 

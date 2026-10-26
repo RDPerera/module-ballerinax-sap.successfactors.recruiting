@@ -1,0 +1,12 @@
+{
+  "description": "WSO2 SAP SuccessFactors Job Application provides a way to interact with the [SAP SuccessFactors Recruiting APIs](https://api.sap.com/package/SuccessFactorsRecruiting/overview). The service allows to query and manage job applications, and to assess applicants through comments, status changes, assessments and background checks.",
+  "communication-scenario": "Job Application Management",
+  "import-statement": "import ballerinax/sap.successfactors.rcmjobapplication as jobapp;",
+  "client-init": "jobapp:Client jobappClient = check new (",
+  "api-invocation": "jobapp:ListJobApplicationsResponse jobApplications = check jobappClient->listJobApplications(\\$top = 10);",
+  "key-features": [
+    "Create, update and query job applications",
+    "Track application statuses and their audit trail",
+    "Access assessment orders, assessment reports and background check results"
+  ]
+}

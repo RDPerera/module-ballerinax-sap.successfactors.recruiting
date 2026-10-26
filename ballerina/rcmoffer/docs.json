@@ -1,0 +1,12 @@
+{
+  "description": "WSO2 SAP SuccessFactors Job Offer provides a way to interact with the [SAP SuccessFactors Recruiting APIs](https://api.sap.com/package/SuccessFactorsRecruiting/overview). The service allows to approve or decline job offers, and to query or manage offer approvers and offer letters.",
+  "communication-scenario": "Job Offer Management",
+  "import-statement": "import ballerinax/sap.successfactors.rcmoffer as offer;",
+  "client-init": "offer:Client offerClient = check new (",
+  "api-invocation": "offer:ListJobOffersResponse jobOffers = check offerClient->listJobOffers(\\$top = 10);",
+  "key-features": [
+    "Create and query job offers",
+    "Approve or decline job offers",
+    "Manage offer approvers and offer letters"
+  ]
+}

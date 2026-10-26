@@ -4,106 +4,112 @@ Author: @RDPerera
 
 ## Overview
 
-The SAP SuccessFactors Recruiting APIs are delivered as Swagger 2.0 specifications from the SAP API Hub. These specifications require several sanitization steps before they can be used to generate idiomatic Ballerina connectors using the `bal openapi` tool.
+The SAP SuccessFactors Recruiting APIs are delivered as Swagger 2.0 specifications from the
+[SAP Business Accelerator Hub](https://api.sap.com/package/SuccessFactorsRecruiting/overview). These specifications
+need several sanitization steps before `bal openapi` can generate idiomatic Ballerina connectors from them.
 
 ## Sanitization Steps
 
-### 1. Schema Name Sanitization (`sanitations.bal`)
+### 1. Operation ID Generation (`operation_id.bal`)
 
-SuccessFactors Swagger 2.0 specs use fully qualified schema names with dots in the `definitions` section (e.g., `SFOData.EmpEmployment`). These cannot be directly mapped to Ballerina type names.
+The specs do not include `operationId` fields, so the sanitizer derives one from the path and the HTTP method:
 
-The sanitizer:
-- Strips the namespace prefix (everything before the last `.`)
-- Removes common suffixes like `_Type`, `Type`, `-create`, `-update`
-- Prefixes Create/Update variants appropriately
-- Updates all `$ref` references throughout the spec to match renamed definitions
+- `GET /JobRequisition` becomes `listJobRequisitions` (collection response)
+- `GET /JobRequisition({jobReqId})` becomes `getJobRequisition` (single entity)
+- `POST /JobRequisition` becomes `createJobRequisition`
+- `PUT`, `PATCH` and `DELETE` become `update...`, `patch...` and `delete...`
+- `GET /JobReqGOPosition({jobReqMultiSelectId})/value` becomes `listValuesOfJobReqGOPosition` (navigation property)
 
-### 2. Response/Payload Envelope Title Sanitization (`sanitations.bal`)
+Additional rules:
 
-OData v2 wraps every entity in a `{"d": ...}` envelope, both in responses and in PUT/PATCH body
-parameters. Swagger 2.0 either leaves this envelope schema untitled (in which case `bal openapi`
-invents a meaningless `Wrapper`/`Wrapper_N` name for it) or copies the entity's own human-readable
-display name onto it verbatim, e.g. `"Time Account Posting Rule"` (which collides with the entity's
-own generated type name and forces `bal openapi` to fall back to an escaped-space identifier like
-`` Time\ Account\ Posting\ Rule ``, unusable as a normal identifier).
+- Function imports (paths that start with a lower-case letter, such as `/approveOffer` or `/inviteToApply`) keep
+  their own name.
+- Collection names are pluralized with English rules, so `JobApplicationStatus` becomes `JobApplicationStatuses`
+  and `Candidate` becomes `Candidates`. Names that already end in `s` (for example `CandidateComments`) are kept.
+- Job Requisition has both `JobLocation` and `JobLocations` entity sets. The multi-select `JobLocations` set is
+  named after its SAP tag (`listJobRequisitionLocations`, `getJobRequisitionLocations`) so the two do not collide.
+- The sanitizer fails if two operations end up with the same `operationId`.
 
-The sanitizer retitles every such envelope schema — for both responses and body parameters, across
-`get`/`post`/`put`/`patch`/`delete` — from the operation's own `operationId`:
-`getTimeAccountPostingRule` → response envelope titled `GetTimeAccountPostingRuleResponse`;
-`updateEmployeeTimeAUS` → body envelope titled `UpdateEmployeeTimeAUSPayload`. This is always
-meaningful and, since it's derived from the (unique) operation name rather than the entity's own
-name, can never collide with the entity type it wraps.
+### 2. Missing Path Parameters (`sanitations.bal`)
 
-### 3. Operation ID Generation (`operationId.bal`)
+Some operations use a path parameter, such as `{jobReqId}`, without declaring it. The sanitizer copies the
+declaration from a sibling operation on the same entity.
 
-SAP SuccessFactors Swagger 2.0 specs do not include `operationId` fields on path operations. Without these, `bal openapi` cannot generate distinct function names.
+### 3. Multi-Type Definitions (`sanitations.bal`)
 
-The sanitizer generates operation IDs based on the path and HTTP method:
-- `GET /EmpEmployment` → `listEmpEmployments` (collection response)
-- `GET /EmpEmployment('userId')` → `getEmpEmployment` (single entity)
-- `POST /EmpEmployment` → `createEmpEmployment`
-- `DELETE /EmpEmployment('userId')` → `deleteEmpEmployment`
-- `PATCH /EmpEmployment('userId')` → `patchEmpEmployment`
+Some properties are typed as a list, such as `["string", "null"]`. The sanitizer narrows them to a single type and
+marks them `x-nullable` when `null` is one of the types. Properties with several non-null types become `string`.
 
-The function name prefix (`list`/`get`/`create`/`update`/`delete`/`patch`) is determined by the HTTP method and whether the response description is `"Retrieved entities"` (collection) or `"Retrieved entity"` (single).
+### 4. Schema Name Sanitization (`sanitations.bal`)
 
-### 4. Client Sanitization (`clientSanitations.bal`)
+The specs use namespace-qualified definition names, such as `SFOData.JobRequisition`. The sanitizer:
 
-After code generation with `bal openapi`, the generated `client.bal` uses a raw `ballerina/http:Client`. This step:
-- Replaces `import ballerina/http;` with `import ballerinax/sap;`
-- Replaces `http:Client clientEp` with `sap:Client clientEp`
-- Replaces the `string serviceUrl` parameter with `string hostname, int port = 443`
-- Adds the full service URL construction: `` string serviceUrl = string `https://${hostname}:${port}/successfactors/odata/v2`; ``
+- Strips the namespace prefix
+- Removes suffixes such as `-create` and `-update` and prefixes the create and update variants instead
+- Retitles `Related Collection(SFOData.X)` and `Collection of X` schemas to `RelatedCollectionOfX` and
+  `CollectionOfX`. Without this, `bal openapi` silently drops the create and update operations that use them.
+- Updates every `$ref` in the spec to match the renamed definitions
 
-The `ballerinax/sap` client provides SAP-specific authentication and connection handling on top of the standard HTTP client.
+### 5. Response and Payload Envelope Titles (`sanitations.bal`)
+
+OData V2 wraps every entity in a `{"d": ...}` envelope. The specs either leave this envelope untitled, so
+`bal openapi` names it `Wrapper`/`Wrapper_N`, or reuse the entity's display name. The sanitizer titles each envelope
+after its operation: `getJobRequisition` gets `GetJobRequisitionResponse`, and a body envelope gets
+`<Operation>Payload`. When `<Operation>Response` is already a definition name, the envelope is titled
+`<Operation>Result` instead, for example `InviteToApplyResult`.
+
+### 6. Client Sanitization (`client_sanitations.bal`)
+
+After code generation, the generated client uses a plain `http:Client`. This step:
+
+- Replaces `http:Client` with `sap:Client`, which handles CSRF tokens and the OAuth 2.0 SAML Bearer flow
+- Replaces `http:ClientConfiguration` with `sap:ConnectionConfig`
+- Replaces the `serviceUrl` parameter with `string hostname, int port = 443` and builds the service URL as
+  `` https://${hostname}:${port}/odata/v2 ``
+- Changes `auth` in `types.bal` to `http:CredentialsConfig|sap:SamlBearerAuthConfig`
+- Formats and builds the package, and fails if the build fails
 
 ## Running the Sanitization
 
 ### Prerequisites
 
 - Ballerina Swan Lake 2201.13.0 or later
-- API specifications in `docs/spec/<apiName>.json`
+- The original API specifications in `docs/spec/<apiName>.json`
 
 ### Step-by-step Process
 
-1. **Obtain OpenAPI specs** from the [SAP API Hub](https://api.sap.com/package/SuccessFactorsRecruiting/odata) and place them in `docs/spec/`.
+Run all commands from the `docs/` directory.
 
-2. **Sanitize schema names** for each API (run from `docs/`, not `docs/sanitation/` — the script
-   resolves specs at `spec/<apiName>.json` relative to the current directory):
+1. Add the operation IDs:
+
    ```bash
-   cd docs
+   bal run sanitation/operation_id.bal -- <apiName>
+   ```
+
+2. Sanitize the specification:
+
+   ```bash
    bal run sanitation/sanitations.bal -- <apiName>
    ```
 
-3. **Add operation IDs** for each API (also run from `docs/`):
+3. Generate the Ballerina client:
+
    ```bash
-   bal run sanitation/operationId.bal -- <apiName>
+   bal openapi -i spec/<apiName>.json -o ../ballerina/<moduleName> --mode client --license license.txt
    ```
 
-4. **Generate Ballerina client** from the sanitized spec:
-   ```bash
-   bal openapi -i docs/spec/<apiName>.json -o ballerina/<moduleName> --mode client
-   ```
+4. Sanitize the generated client:
 
-5. **Sanitize the generated client**:
    ```bash
-   cd docs/sanitation
-   bal run clientSanitations.bal -- <moduleName> odata/v2
-   ```
-   (the real SAP SuccessFactors OData v2 endpoint is `/odata/v2`, not `/successfactors/odata/v2` —
-   see `changelog.md`)
-
-6. **Build and verify**:
-   ```bash
-   ./gradlew :ballerina:<moduleName>:build
+   bal run sanitation/client_sanitations.bal -- <moduleName> odata/v2
    ```
 
 ### Supported Modules
 
-| Module | API Name |
-|--------|----------|
-| `rcmjobrequisition` | `rcmjobrequisition` |
-| `rcmjobapplication` | `rcmjobapplication` |
-| `rcmcandidate` | `rcmcandidate` |
-| `rcmoffer` | `rcmoffer` |
-| `recruitingrcm` | `recruitingrcm` |
+| Module | API Name | API |
+|--------|----------|-----|
+| `rcmjobrequisition` | `RCMJobRequisition` | Job Requisition |
+| `rcmjobapplication` | `RCMJobApplication` | Job Application |
+| `rcmcandidate` | `RCMCandidate` | Candidate |
+| `rcmoffer` | `RCMOffer` | Job Offer |
+| `recruitingrcm` | `RecruitingRCM` | Job Application Interview |

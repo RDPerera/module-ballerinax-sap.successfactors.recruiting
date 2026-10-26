@@ -1,0 +1,12 @@
+{
+  "description": "WSO2 SAP SuccessFactors Job Application Interview provides a way to interact with the [SAP SuccessFactors Recruiting APIs](https://api.sap.com/package/SuccessFactorsRecruiting/overview). The service allows to view and edit job interviews, including their date and time, interviewers and assessments, and to invite candidates to apply for a job requisition.",
+  "communication-scenario": "Interview Management",
+  "import-statement": "import ballerinax/sap.successfactors.recruitingrcm as interview;",
+  "client-init": "interview:Client interviewClient = check new (",
+  "api-invocation": "interview:ListJobApplicationInterviewsResponse interviews = check interviewClient->listJobApplicationInterviews(\\$top = 10);",
+  "key-features": [
+    "Create, update and query job application interviews",
+    "Access individual and overall interview assessments",
+    "Invite candidates to apply for a job requisition"
+  ]
+}

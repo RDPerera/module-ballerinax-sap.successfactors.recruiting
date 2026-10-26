@@ -1,0 +1,12 @@
+{
+  "description": "WSO2 SAP SuccessFactors Job Requisition provides a way to interact with the [SAP SuccessFactors Recruiting APIs](https://api.sap.com/package/SuccessFactorsRecruiting/overview). The service allows to create and manage job requisitions, including their postings, locations, operators, screening questions and translations.",
+  "communication-scenario": "Job Requisition Management",
+  "import-statement": "import ballerinax/sap.successfactors.rcmjobrequisition as jobreq;",
+  "client-init": "jobreq:Client jobreqClient = check new (",
+  "api-invocation": "jobreq:ListJobRequisitionsResponse jobRequisitions = check jobreqClient->listJobRequisitions(\\$top = 10);",
+  "key-features": [
+    "Create, update and query job requisitions",
+    "Manage job postings, locations and requisition operators",
+    "Maintain screening questions and their choices"
+  ]
+}

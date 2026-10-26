@@ -1,0 +1,12 @@
+{
+  "description": "WSO2 SAP SuccessFactors Candidate provides a way to interact with the [SAP SuccessFactors Recruiting APIs](https://api.sap.com/package/SuccessFactorsRecruiting/overview). The service allows to query and maintain candidate profiles and their background information, such as education, work experience, certificates and languages.",
+  "communication-scenario": "Candidate Management",
+  "import-statement": "import ballerinax/sap.successfactors.rcmcandidate as candidate;",
+  "client-init": "candidate:Client candidateClient = check new (",
+  "api-invocation": "candidate:ListCandidatesResponse candidates = check candidateClient->listCandidates(\\$top = 10);",
+  "key-features": [
+    "Create, update and query candidate profiles",
+    "Maintain candidate background information, such as education and work experience",
+    "Manage candidate comments, tags and SMS notification preferences"
+  ]
+}
